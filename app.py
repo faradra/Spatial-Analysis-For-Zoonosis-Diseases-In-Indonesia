@@ -759,7 +759,7 @@ def main():
                 with st.spinner("Fitting spatial models..."): # <-- INDENTASI DIMULAI DI SINI
                     models = fit_spatial_models(merged_data, selected_disease, selected_factors, weights)
                     if models:
-                        st.subheader("📊 Model Comparison")
+                        # st.subheader("📊 Model Comparison")
                         comparison_data = []
                     else:
                         pass
