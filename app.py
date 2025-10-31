@@ -95,9 +95,13 @@ def load_disease_data():
             data[f'{disease}_prev'].replace([np.inf, -np.inf], 0, inplace=True)
             data[f'{disease}_prev'].fillna(0, inplace=True)
             
+            batas25 = data[f'{disease}_prev'].quantile(0.25)
+            batas50 = data[f'{disease}_prev'].quantile(0.50)
+            batas75 = data[f'{disease}_prev'].quantile(0.75)
+
             # Pre-calculate risk levels
             data[f'{disease}_risk'] = data[f'{disease}_prev'].apply(
-                lambda x: get_risk_level(x, disease)
+                lambda x: get_risk_level(x, disease, batas25, batas50, batas75)
             )
         return data
         # st.write(data)
@@ -296,15 +300,14 @@ def fit_spatial_models(gdf, disease_var, x_vars, w):
 # UTILITY FUNCTIONS
 # ============================================================================
 
-def get_risk_level(value, disease_var):
+def get_risk_level(value, disease_var, q1, q2, q3):
     """Determine risk level based on prevalence"""
     thresholds = {
-        'dbd': {'low': 10, 'medium': 50, 'high': 100},
-        'malaria': {'low': 5, 'medium': 20, 'high': 50},
-        'filariasis': {'low': 1, 'medium': 5, 'high': 10}
+        'dbd': {'low': q1, 'medium': q2, 'high': q3},
+        'malaria': {'low': q1, 'medium': q2, 'high': q3},
+        'filariasis': {'low': q1, 'medium': q2, 'high': q3}
     }
-    
-    thresh = thresholds.get(disease_var, thresholds['dbd'])
+    thresh = thresholds.get(disease_var, thresholds[disease_var])
     
     if pd.isna(value):
         return "No Data"
@@ -322,11 +325,11 @@ def get_risk_color(risk_level):
     colors = {
         "Low Risk": "#FFEB3B",
         "Medium Risk": "#FF9800",
-        "High Risk": "#FF5722",
-        "Very High Risk": "#F44336",
+        "High Risk": "#F0592B",
+        "Very High Risk": "#020000",
         "No Data": "#9E9E9E"
     }
-    return colors.get(risk_level, "#9E9E9E")
+    return colors.get(risk_level, "#0A0000")
 
 def create_download_link(fig, filename):
     """Create download link for matplotlib figure"""
@@ -344,7 +347,7 @@ def main():
     st.title("🦟 Indonesia Disease Risk Explorer")
     
     # Sidebar
-    st.sidebar.header("⚙️ Settings")
+    st.sidebar.header("⚙ Settings")
     
     # Disease selection
     disease_names = {
@@ -401,12 +404,12 @@ def main():
     
     # Tabs
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "🗺️ Interactive Map",
+        "🗺 Interactive Map",
         "🔍 Province Explorer",
         "📊 Risk Patterns",
         "📈 Statistical Model",
         "📋 Data Summary",
-        "ℹ️ How to Use"
+        "ℹ How to Use"
     ])
     
     # TAB 1: INTERACTIVE MAP
@@ -432,13 +435,17 @@ def main():
             st.metric("Low Risk Provinces", low_risk)
         
         # ===== MAP SECTION =====
-        st.subheader("Disease Prevalence Map")
+        if selected_disease == 'filariasis':
+            st.subheader("Disease Prevalence Map")
+        else:
+            st.subheader('Disease Incidence Map')
         
         prevalence_var = f"{selected_disease}_prev"
+        prevalence_risk = f"{selected_disease}_risk"
         
-        # ⚠️ Convert GeoDataFrame to geojson dict
+        # ⚠ Convert GeoDataFrame to geojson dict
         merged_data = merged_data.set_index("NAME_1")  # pakai nama provinsi sebagai key
-        # geojson_data = merged_data.__geo_interface__
+        # geojson_data = merged_data._geo_interface_
         geojson_data = json.loads(merged_data.to_json())
 
         with st.container(border=True):
@@ -447,7 +454,7 @@ def main():
                 merged_data,
                 geojson=geojson_data,
                 locations=merged_data.index,
-                color=prevalence_var,
+                color=prevalence_risk,
                 hover_name=merged_data.index,
                 hover_data={
                     selected_disease: ':,.0f',
@@ -455,14 +462,20 @@ def main():
                     risk_var: True,
                     # merged_data.index: False
                 },
-                color_continuous_scale=['#FFEB3B', '#FFC107', '#FF9800', '#FF5722', '#F44336'],
-                labels={prevalence_var: 'Prevalence (per 100k)'}
+                # color_continuous_scale=['#FFC107', '#FF9800', '#FF5722', "#170302"],
+                color_discrete_map={
+                    "Low Risk":  "#F6D745",
+                    "Medium Risk": "#E55C30",
+                    "High Risk": "#84206B",
+                    "Very High Risk": "#140B34"
+                },
+                # labels={prevalence_var: 'Prevalence (per 100k)'}
             )
             # fig.update_geos(center={"lat": -2.5, "lon": 118})
             fig.update_geos(fitbounds="locations", visible=False)
             fig.update_layout(height=700, margin={"r":0,"t":0,"l":0,"b":0})
             
-            st.plotly_chart(fig, use_container_width=True, config={'scrollZoom':False})
+            st.plotly_chart(fig, use_container_width=True)
         
         st.info("💡 Tip: Interactive map with zoom/pan. Hover to see details. Yellow = Low risk, Orange-Red = High risk.")
     
@@ -491,14 +504,14 @@ def main():
             """, unsafe_allow_html=True)
             
             st.write("")
-            st.write(f"**Total Cases:** {int(province_data[selected_disease]):,}")
-            st.write(f"**Prevalence:** {province_data[prevalence_var]:.2f} per 100,000")
-            st.write(f"**Population:** {int(province_data['population']):,} thousand")
+            st.write(f"*Total Cases:* {int(province_data[selected_disease]):,}")
+            st.write(f"*Prevalence:* {province_data[prevalence_var]:.2f} per 100,000")
+            st.write(f"*Population:* {int(province_data['population']):,} thousand")
             st.write("")
-            st.write(f"**Clean Water Access:** {province_data['sanitation']:.1f}%")
-            st.write(f"**Population Density:** {province_data['pop_density']:.0f} people/km²")
-            st.write(f"**Hospitals:** {int(province_data['hospitals'])}")
-            st.write(f"**Poverty Rate:** {province_data['poor_pct']:.1f}%")
+            st.write(f"*Clean Water Access:* {province_data['sanitation']:.1f}%")
+            st.write(f"*Population Density:* {province_data['pop_density']:.0f} people/km²")
+            st.write(f"*Hospitals:* {int(province_data['hospitals'])}")
+            st.write(f"*Poverty Rate:* {province_data['poor_pct']:.1f}%")
         
         with col2:
             st.subheader("Location Map")
@@ -528,10 +541,10 @@ def main():
                     'Other Provinces': 'lightgray',
                     'Selected Province': '#2196F3',
                     
-                    'Neighbor - Very High Risk': '#800000',
-                    'Neighbor - High Risk': "#F46236",
-                    'Neighbor - Medium Risk': "#FECC5C",
-                    'Neighbor - Low Risk': "#FFFFB2"
+                    'Neighbor - Very High Risk': '#140B34',
+                    'Neighbor - High Risk': "#84206B",
+                    'Neighbor - Medium Risk': "#E55C30",
+                    'Neighbor - Low Risk': "#F6D746"
                 }
                 title_text = f"Location: {selected_province} and Neighbors"
 
@@ -591,16 +604,16 @@ def main():
                 if morans['P_value'] < 0.05:
                     if morans['Statistic'] > 0:
                         st.error("""
-                        🔥 **Disease Clustering Detected!**
+                        🔥 *Disease Clustering Detected!*
                         
                         Provinces with high disease prevalence are located close to other provinces with high prevalence.
                         
-                        **Action needed:** Focus on hotspot clusters and implement border control measures.
+                        *Action needed:* Focus on hotspot clusters and implement border control measures.
                         """)
                     else:
-                        st.info("📍 **Scattered Pattern Detected** - High and low prevalence provinces are randomly distributed.")
+                        st.info("📍 *Scattered Pattern Detected* - High and low prevalence provinces are randomly distributed.")
                 else:
-                    st.success("✅ **No Clear Pattern** - Disease distribution appears random.")
+                    st.success("✅ *No Clear Pattern* - Disease distribution appears random.")
                 
                 # LISA Map
                 st.subheader("Prevalence Pattern Map (LISA Analysis)")
@@ -631,12 +644,12 @@ def main():
                         
                         st.pyplot(fig)
                     
-                    st.write("**What do the colors mean?**")
-                    st.write("- **Red (Hotspot - HH):** High prevalence area surrounded by other high prevalence areas")
-                    st.write("- **Blue (Coldspot - LL):** Low prevalence area surrounded by other low prevalence areas")
-                    st.write("- **Yellow (Outlier - HL):** High prevalence area surrounded by low prevalence areas")
-                    st.write("- **Light Blue (Outlier - LH):** Low prevalence area surrounded by high prevalence areas")
-                    st.write("- **Gray (Not Significant):** No clear pattern detected")
+                    st.write("*What do the colors mean?*")
+                    st.write("- *Red (Hotspot - HH):* High prevalence area surrounded by other high prevalence areas")
+                    st.write("- *Blue (Coldspot - LL):* Low prevalence area surrounded by other low prevalence areas")
+                    st.write("- *Yellow (Outlier - HL):* High prevalence area surrounded by low prevalence areas")
+                    st.write("- *Light Blue (Outlier - LH):* Low prevalence area surrounded by high prevalence areas")
+                    st.write("- *Gray (Not Significant):* No clear pattern detected")
     
     # TAB 4: STATISTICAL MODEL
     with tab4:
@@ -645,9 +658,9 @@ def main():
         st.write("""
         This analysis compares different statistical models to understand how factors influence disease prevalence.
         
-        - **OLS:** Standard regression
-        - **Spatial Lag (SAR):** Considers neighboring provinces' disease prevalence
-        - **Spatial Error (SEM):** Accounts for spatial patterns in errors
+        - *OLS:* Standard regression
+        - *Spatial Lag (SAR):* Considers neighboring provinces' disease prevalence
+        - *Spatial Error (SEM):* Accounts for spatial patterns in errors
         """)
         
         if weights is not None and len(selected_factors) > 0:
@@ -683,7 +696,7 @@ def main():
                     st.dataframe(comparison_df.style.highlight_max(subset=['R²'], color='lightgreen')
                                 .highlight_min(subset=['AIC'], color='lightgreen'))
                     
-                    st.success(f"🏆 **Recommended Model:** {comparison_df.loc[best_idx, 'Model']}")
+                    st.success(f"🏆 *Recommended Model:* {comparison_df.loc[best_idx, 'Model']}")
                     
                     # Detailed coefficients
                     st.subheader("Factor Impact Analysis")
@@ -828,14 +841,14 @@ def main():
         
         The dashboard uses intuitive color coding:
         
-        - **Interactive Map:** Yellow (low risk) → Orange → Red (high risk)
-        - **Province Explorer:** Neighbors colored by risk level, selected province in contrasting color
-        - **Risk Patterns:** Red (hotspots), Blue (coldspots), Yellow/Light Blue (outliers)
+        - *Interactive Map:* Yellow (low risk) → Orange → Red (high risk)
+        - *Province Explorer:* Neighbors colored by risk level, selected province in contrasting color
+        - *Risk Patterns:* Red (hotspots), Blue (coldspots), Yellow/Light Blue (outliers)
         """)
 
 # ============================================================================
 # RUN APPLICATION
 # ============================================================================
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     main()
